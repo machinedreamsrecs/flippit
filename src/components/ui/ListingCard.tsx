@@ -1,19 +1,20 @@
 import { Link } from 'react-router-dom';
 import { Bookmark, BookmarkCheck, ExternalLink } from 'lucide-react';
-import type { Listing } from '../../data/types';
+import type { Listing, DealEvaluation } from '../../data/types';
 import { getEvaluation } from '../../data/mockListings';
 import { formatPrice, timeAgo, cn } from '../../lib/utils';
 import DealScoreBadge from './DealScoreBadge';
 
 interface Props {
   listing: Listing;
+  evaluation?: DealEvaluation;
   compact?: boolean;
   isSaved?: boolean;
   onSave?: () => void;
 }
 
-export default function ListingCard({ listing, compact = false, isSaved = false, onSave }: Props) {
-  const evaluation = getEvaluation(listing.id);
+export default function ListingCard({ listing, evaluation: evalProp, compact = false, isSaved = false, onSave }: Props) {
+  const evaluation = evalProp ?? getEvaluation(listing.id);
   const isFlagged = evaluation?.flagged;
 
   return (
@@ -25,7 +26,7 @@ export default function ListingCard({ listing, compact = false, isSaved = false,
           : 'border-gray-100 shadow-card hover:shadow-card-hover'
       )}
     >
-      <Link to={`/listing/${listing.id}`} className="block">
+      <Link to={`/listing/${listing.id}`} state={{ listing, evaluation }} className="block">
         {/* Image */}
         <div className={cn('relative overflow-hidden rounded-t-lg', compact ? 'h-36' : 'h-44')}>
           <img

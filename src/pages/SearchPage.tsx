@@ -224,6 +224,7 @@ export default function SearchPage() {
                         <ListingCard
                           key={l.id}
                           listing={l}
+                          evaluation={getEval(l.id)}
                           onSave={() => {
                             if (!user) { navigate(`/login?returnTo=/search?q=${encodeURIComponent(query)}`); return; }
                             if (isSaved) { toast('Search already saved.'); return; }
@@ -257,7 +258,7 @@ export default function SearchPage() {
                     />
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {unflagged.map(l => (
-                        <ListingCard key={l.id} listing={l} />
+                        <ListingCard key={l.id} listing={l} evaluation={getEval(l.id)} />
                       ))}
                     </div>
                   </div>

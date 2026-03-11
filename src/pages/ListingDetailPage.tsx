@@ -1,6 +1,7 @@
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { ExternalLink, ArrowLeft, MapPin, Star, Package, Info, Bookmark, BookmarkCheck } from 'lucide-react';
 import { ALL_LISTINGS, getEvaluation, getComparableListings, getComparableGroup } from '../data/mockListings';
+import type { Listing, DealEvaluation } from '../data/types';
 import { formatPrice, timeAgo } from '../lib/utils';
 import DealScoreBadge from '../components/ui/DealScoreBadge';
 import ConfidenceBadge from '../components/ui/ConfidenceBadge';
@@ -13,9 +14,12 @@ import { toast } from 'sonner';
 export default function ListingDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { canSaveMore, saveSearch, isSearchSaved } = useUser();
-  const listing = ALL_LISTINGS.find(l => l.id === id);
+
+  const stateData = location.state as { listing?: Listing; evaluation?: DealEvaluation } | null;
+  const listing: Listing | undefined = stateData?.listing ?? ALL_LISTINGS.find(l => l.id === id);
 
   if (!listing) {
     return (
@@ -27,7 +31,7 @@ export default function ListingDetailPage() {
     );
   }
 
-  const evaluation = getEvaluation(listing.id);
+  const evaluation = stateData?.evaluation ?? getEvaluation(listing.id);
   const comparables = getComparableListings(listing.id);
   const group = getComparableGroup(listing.id);
 
