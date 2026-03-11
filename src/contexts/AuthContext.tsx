@@ -57,17 +57,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message);
+    // Set user immediately so navigation doesn't race with onAuthStateChange
+    if (data.user) {
+      const profile = await fetchUserProfile(data.user.id);
+      setUser(profile);
+    }
   }, []);
 
   const signUp = useCallback(async (email: string, password: string, name?: string) => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { name: name ?? email.split('@')[0] } },
     });
     if (error) throw new Error(error.message);
+    // If a session was returned (email confirmation disabled), seed the profile row
+    if (data.user && data.session) {
+      await supabase.from('users').upsert(
+        { id: data.user.id, email: data.user.email ?? email, name: name ?? email.split('@')[0], plan: 'free' },
+        { onConflict: 'id' }
+      );
+      const profile = await fetchUserProfile(data.user.id);
+      setUser(profile);
+    }
   }, []);
 
   const logout = useCallback(async () => {
