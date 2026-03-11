@@ -1,14 +1,20 @@
-import { useParams, Link } from 'react-router-dom';
-import { ExternalLink, ArrowLeft, MapPin, Star, Package, Info } from 'lucide-react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { ExternalLink, ArrowLeft, MapPin, Star, Package, Info, Bookmark, BookmarkCheck } from 'lucide-react';
 import { ALL_LISTINGS, getEvaluation, getComparableListings, getComparableGroup } from '../data/mockListings';
 import { formatPrice, timeAgo } from '../lib/utils';
 import DealScoreBadge from '../components/ui/DealScoreBadge';
 import ConfidenceBadge from '../components/ui/ConfidenceBadge';
 import ListingCard from '../components/ui/ListingCard';
 import EmptyState from '../components/ui/EmptyState';
+import { useAuth } from '../contexts/AuthContext';
+import { useUser } from '../contexts/UserContext';
+import { toast } from 'sonner';
 
 export default function ListingDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { canSaveMore, saveSearch, isSearchSaved } = useUser();
   const listing = ALL_LISTINGS.find(l => l.id === id);
 
   if (!listing) {
@@ -25,13 +31,44 @@ export default function ListingDetailPage() {
   const comparables = getComparableListings(listing.id);
   const group = getComparableGroup(listing.id);
 
+  // Use normalized title as the watch query
+  const watchQuery = listing.normalizedTitle.split(' ').slice(0, 4).join(' ');
+  const isSaved = isSearchSaved(watchQuery);
+
+  function handleWatch() {
+    if (!user) {
+      navigate(`/login?returnTo=/listing/${listing!.id}`);
+      return;
+    }
+    if (isSaved) { toast('Search already saved.'); return; }
+    if (!canSaveMore) {
+      toast.error("You've reached the free plan limit. Upgrade to save more searches.");
+      return;
+    }
+    saveSearch(watchQuery, {});
+    toast.success('Added to your watchlist.');
+  }
+
   return (
     <div className="flex-1 bg-gray-50">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Back */}
-        <Link to={-1 as never} className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-6 transition-colors">
-          <ArrowLeft className="w-4 h-4" /> Back to results
-        </Link>
+        {/* Back + Watch row */}
+        <div className="flex items-center justify-between mb-6">
+          <Link to={-1 as never} className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+            <ArrowLeft className="w-4 h-4" /> Back to results
+          </Link>
+          <button
+            onClick={handleWatch}
+            className={`flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+              isSaved
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300 hover:text-indigo-600'
+            }`}
+          >
+            {isSaved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+            {isSaved ? 'Watching' : 'Watch this product'}
+          </button>
+        </div>
 
         <div className="grid lg:grid-cols-5 gap-6">
           {/* Left: Image + Deal Panel */}
