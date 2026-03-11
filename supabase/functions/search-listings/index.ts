@@ -66,10 +66,22 @@ function median(values: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
-function computeDealScore(totalPrice: number, allPrices: number[], count: number) {
-  const med = median(allPrices);
+// ─── Deal scoring — sold comps as primary baseline ────────────────────────────
+//
+// Priority: recently-sold prices > active listing prices
+// Confidence comes from how many sold comps we have.
+// If < 2 sold comps exist, fall back to active listing median (Low confidence).
+
+function computeDealScore(
+  totalPrice: number,
+  activePrices: number[],
+  soldPrices: number[],
+) {
+  const usingSoldComps = soldPrices.length >= 2;
+  const comps = usingSoldComps ? soldPrices : activePrices;
+  const med = median(comps);
   const pctBelow = med > 0 ? (med - totalPrice) / med : 0;
-  const confidence = count >= 5 ? 'High' : count >= 3 ? 'Medium' : 'Low';
+  const confidence = comps.length >= 5 ? 'High' : comps.length >= 3 ? 'Medium' : 'Low';
 
   let dealScore: string;
   if (pctBelow > 0.2 && confidence !== 'Low') dealScore = 'Strong';
@@ -79,15 +91,21 @@ function computeDealScore(totalPrice: number, allPrices: number[], count: number
 
   let flagReason = '';
   if (dealScore === 'Strong') {
-    flagReason = confidence === 'High'
-      ? 'Priced well below similar live listings'
-      : 'Lower total price than most comparable listings, including shipping';
+    flagReason = usingSoldComps
+      ? 'Priced well below recent sold prices for this item'
+      : confidence === 'High'
+        ? 'Priced well below similar live listings'
+        : 'Lower total price than most comparable listings, including shipping';
   } else if (dealScore === 'Good') {
-    flagReason = pctBelow > 0.15
-      ? 'Strong price relative to similar condition listings'
-      : 'Below the typical price range for this item';
+    flagReason = usingSoldComps
+      ? `Listed ${Math.round(pctBelow * 100)}% below the recent average sold price`
+      : pctBelow > 0.15
+        ? 'Strong price relative to similar condition listings'
+        : 'Below the typical price range for this item';
   } else if (dealScore === 'Possible') {
-    flagReason = 'Could be a deal, but listing details are limited';
+    flagReason = usingSoldComps
+      ? 'Slightly below recent sold prices — could be a deal'
+      : 'Could be a deal, but listing details are limited';
   }
 
   return {
@@ -97,6 +115,7 @@ function computeDealScore(totalPrice: number, allPrices: number[], count: number
     flagReason,
     flagged: dealScore !== 'None',
     medianPrice: med,
+    usingSoldComps,
   };
 }
 
@@ -106,7 +125,8 @@ function safeParsePrice(val: unknown): number {
   return isNaN(num) ? 0 : num;
 }
 
-// ─── eBay Browse API ──────────────────────────────────────────────────────────
+// ─── eBay OAuth token ─────────────────────────────────────────────────────────
+// Requests both Browse and Marketplace Insights scopes in a single token.
 
 async function getEbayToken(appId: string, certId: string): Promise<string> {
   const credentials = btoa(`${appId}:${certId}`);
@@ -116,23 +136,18 @@ async function getEbayToken(appId: string, certId: string): Promise<string> {
       'Authorization': `Basic ${credentials}`,
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: 'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope',
+    body: 'grant_type=client_credentials' +
+      '&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope' +
+      '%20https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope%2Fbuy.marketplace.insights',
   });
   const data = await res.json();
   if (!data.access_token) throw new Error(`eBay OAuth failed: ${data.error_description ?? 'Unknown'}`);
   return data.access_token as string;
 }
 
-async function fetchEbay(query: string, filters: SearchFilters): Promise<NormalizedListing[]> {
-  const appId = Deno.env.get('EBAY_APP_ID');
-  const certId = Deno.env.get('EBAY_CERT_ID');
-  if (!appId || !certId) {
-    console.warn('[eBay] EBAY_APP_ID or EBAY_CERT_ID not set — skipping');
-    return [];
-  }
+// ─── eBay Browse API (active listings) ───────────────────────────────────────
 
-  const token = await getEbayToken(appId, certId);
-
+async function fetchEbay(query: string, filters: SearchFilters, token: string): Promise<NormalizedListing[]> {
   const params = new URLSearchParams({ q: query, limit: '20' });
   const condMap: Record<string, string> = {
     'New': '1000', 'Like New': '2500', 'Good': '3000', 'Fair': '4000', 'Poor': '7000',
@@ -148,17 +163,12 @@ async function fetchEbay(query: string, filters: SearchFilters): Promise<Normali
 
   const res = await fetch(
     `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`,
-    {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
-      },
-    }
+    { headers: { 'Authorization': `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US' } }
   );
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`eBay API ${res.status}: ${text.slice(0, 300)}`);
+    throw new Error(`eBay Browse ${res.status}: ${text.slice(0, 300)}`);
   }
 
   const data = await res.json();
@@ -194,6 +204,25 @@ async function fetchEbay(query: string, filters: SearchFilters): Promise<Normali
   });
 }
 
+// ─── eBay Marketplace Insights API (recently sold) ────────────────────────────
+
+async function fetchEbaySoldComps(query: string, token: string): Promise<number[]> {
+  const params = new URLSearchParams({ q: query, limit: '50' });
+  const res = await fetch(
+    `https://api.ebay.com/buy/marketplace_insights/v1_beta/item_sales/search?${params}`,
+    { headers: { 'Authorization': `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US' } }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`eBay Insights ${res.status}: ${text.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  const sales: Record<string, unknown>[] = data.itemSales ?? [];
+  return sales
+    .map(s => safeParsePrice((s.lastSoldPrice as Record<string, string> | undefined)?.value))
+    .filter(p => p > 0);
+}
+
 // ─── Apify helper ─────────────────────────────────────────────────────────────
 
 async function runApifyActor(
@@ -217,22 +246,16 @@ async function runApifyActor(
   return Array.isArray(data) ? data : [];
 }
 
-// ─── Mercari (Apify: parseforge/mercari-scraper) ──────────────────────────────
+// ─── Mercari active listings (Apify) ─────────────────────────────────────────
 
-async function fetchMercari(query: string, _filters: SearchFilters): Promise<NormalizedListing[]> {
-  const token = Deno.env.get('APIFY_API_TOKEN');
-  if (!token) { console.warn('[Mercari] APIFY_API_TOKEN not set — skipping'); return []; }
-
+async function fetchMercari(query: string, _filters: SearchFilters, token: string): Promise<NormalizedListing[]> {
   const items = await runApifyActor('parseforge~mercari-scraper', {
-    searchQuery: query,
-    maxItems: 15,
-    status: 'on_sale',
+    searchQuery: query, maxItems: 15, status: 'on_sale',
   }, token);
 
   return items
     .filter(item => item.name || item.title)
     .map(item => {
-      const price = safeParsePrice(item.price);
       const seller = item.seller as Record<string, unknown> | undefined;
       return {
         source: 'Mercari',
@@ -240,7 +263,7 @@ async function fetchMercari(query: string, _filters: SearchFilters): Promise<Nor
         externalId: (item.id ?? String(Math.random())) as string,
         title: ((item.name ?? item.title ?? '') as string),
         imageUrl: (item.thumbnailUrl ?? item.photo ?? '') as string,
-        price,
+        price: safeParsePrice(item.price),
         shippingPrice: 0,
         condition: normalizeCondition((item.condition ?? item.itemCondition) as string),
         sellerName: (seller?.name ?? item.sellerName ?? '') as string,
@@ -252,16 +275,22 @@ async function fetchMercari(query: string, _filters: SearchFilters): Promise<Nor
     });
 }
 
-// ─── Facebook Marketplace (Apify: apify/facebook-marketplace-scraper) ─────────
+// ─── Mercari sold comps (Apify — same actor, status:'sold') ───────────────────
 
-async function fetchFacebookMarketplace(query: string, filters: SearchFilters): Promise<NormalizedListing[]> {
-  const token = Deno.env.get('APIFY_API_TOKEN');
-  if (!token) { console.warn('[Facebook Marketplace] APIFY_API_TOKEN not set — skipping'); return []; }
+async function fetchMercariSoldComps(query: string, token: string): Promise<number[]> {
+  const items = await runApifyActor('parseforge~mercari-scraper', {
+    searchQuery: query, maxItems: 30, status: 'sold',
+  }, token);
+  return items
+    .map(item => safeParsePrice(item.price))
+    .filter(p => p > 0);
+}
 
+// ─── Facebook Marketplace (Apify) ────────────────────────────────────────────
+
+async function fetchFacebookMarketplace(query: string, filters: SearchFilters, token: string): Promise<NormalizedListing[]> {
   const input: Record<string, unknown> = {
-    searchTerms: [query],
-    maxItems: 15,
-    countryCode: 'US',
+    searchTerms: [query], maxItems: 15, countryCode: 'US',
   };
   if (filters.maxPrice) input.maxPrice = Number(filters.maxPrice);
 
@@ -291,23 +320,16 @@ async function fetchFacebookMarketplace(query: string, filters: SearchFilters): 
     });
 }
 
-// ─── OfferUp (Apify: caxef/offerup-scraper) ───────────────────────────────────
+// ─── OfferUp (Apify) ──────────────────────────────────────────────────────────
 
-async function fetchOfferUp(query: string, _filters: SearchFilters): Promise<NormalizedListing[]> {
-  const token = Deno.env.get('APIFY_API_TOKEN');
-  if (!token) { console.warn('[OfferUp] APIFY_API_TOKEN not set — skipping'); return []; }
-
+async function fetchOfferUp(query: string, _filters: SearchFilters, token: string): Promise<NormalizedListing[]> {
   const items = await runApifyActor('caxef~offerup-scraper', {
-    searchTerm: query,
-    maxItems: 15,
-    postalCode: '10001',
-    radius: 100,
+    searchTerm: query, maxItems: 15, postalCode: '10001', radius: 100,
   }, token);
 
   return items
     .filter(item => item.title)
     .map(item => {
-      const price = safeParsePrice(item.price);
       const seller = item.seller as Record<string, unknown> | undefined;
       return {
         source: 'OfferUp',
@@ -315,7 +337,7 @@ async function fetchOfferUp(query: string, _filters: SearchFilters): Promise<Nor
         externalId: String(item.id ?? Math.random()),
         title: (item.title ?? '') as string,
         imageUrl: (item.picUrl ?? item.imageUrl ?? '') as string,
-        price,
+        price: safeParsePrice(item.price),
         shippingPrice: 0,
         condition: normalizeCondition(item.condition as string),
         sellerName: (seller?.name ?? '') as string,
@@ -329,17 +351,9 @@ async function fetchOfferUp(query: string, _filters: SearchFilters): Promise<Nor
 
 // ─── Google Shopping (SerpAPI) ────────────────────────────────────────────────
 
-async function fetchGoogleShopping(query: string, filters: SearchFilters): Promise<NormalizedListing[]> {
-  const apiKey = Deno.env.get('SERPAPI_KEY');
-  if (!apiKey) { console.warn('[Google Shopping] SERPAPI_KEY not set — skipping'); return []; }
-
+async function fetchGoogleShopping(query: string, filters: SearchFilters, apiKey: string): Promise<NormalizedListing[]> {
   const params = new URLSearchParams({
-    engine: 'google_shopping',
-    q: query,
-    api_key: apiKey,
-    num: '20',
-    gl: 'us',
-    hl: 'en',
+    engine: 'google_shopping', q: query, api_key: apiKey, num: '20', gl: 'us', hl: 'en',
   });
   if (filters.maxPrice) params.set('tbs', `mr:1,price:1,ppr_max:${filters.maxPrice}`);
 
@@ -402,13 +416,29 @@ Deno.serve(async (req: Request) => {
 
     console.log(`[search-listings] query="${query}" filters=${JSON.stringify(filters)}`);
 
-    // ── Fetch all sources in parallel ─────────────────────────────────────────
+    // ── Resolve API credentials ───────────────────────────────────────────────
+    const ebayAppId = Deno.env.get('EBAY_APP_ID');
+    const ebayCertId = Deno.env.get('EBAY_CERT_ID');
+    const apifyToken = Deno.env.get('APIFY_API_TOKEN');
+    const serpApiKey = Deno.env.get('SERPAPI_KEY');
+
+    // Fetch eBay token once (covers Browse + Marketplace Insights)
+    let ebayToken: string | null = null;
+    if (ebayAppId && ebayCertId) {
+      ebayToken = await getEbayToken(ebayAppId, ebayCertId).catch(e => {
+        console.error('[eBay token]', e.message); return null;
+      });
+    } else {
+      console.warn('[eBay] EBAY_APP_ID or EBAY_CERT_ID not set — skipping eBay');
+    }
+
+    // ── Fetch active listings from all 5 sources in parallel ──────────────────
     const [eBayRes, mercariRes, fbRes, offerUpRes, googleRes] = await Promise.allSettled([
-      fetchEbay(query, filters),
-      fetchMercari(query, filters),
-      fetchFacebookMarketplace(query, filters),
-      fetchOfferUp(query, filters),
-      fetchGoogleShopping(query, filters),
+      ebayToken ? fetchEbay(query, filters, ebayToken) : Promise.resolve([]),
+      apifyToken ? fetchMercari(query, filters, apifyToken) : Promise.resolve([]),
+      apifyToken ? fetchFacebookMarketplace(query, filters, apifyToken) : Promise.resolve([]),
+      apifyToken ? fetchOfferUp(query, filters, apifyToken) : Promise.resolve([]),
+      serpApiKey ? fetchGoogleShopping(query, filters, serpApiKey) : Promise.resolve([]),
     ]);
 
     const allListings: NormalizedListing[] = [];
@@ -423,7 +453,7 @@ Deno.serve(async (req: Request) => {
       ['Google Shopping', googleRes],
     ] as Array<[string, PromiseSettledResult<NormalizedListing[]>]>) {
       if (result.status === 'fulfilled') {
-        console.log(`[${name}] ${result.value.length} results`);
+        console.log(`[${name}] ${result.value.length} active listings`);
         allListings.push(...result.value);
         sourceMeta[name] = result.value.length;
       } else {
@@ -434,26 +464,38 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Apply additional client-side filters not handled at source level
     const filtered = applyFilters(allListings, filters);
 
     if (filtered.length === 0) {
       return new Response(
         JSON.stringify({
-          success: true,
-          listings: [],
-          evaluations: [],
-          comparableGroups: [],
-          sourceErrors,
-          meta: { totalResults: 0, sources: sourceMeta },
+          success: true, listings: [], evaluations: [], comparableGroups: [],
+          sourceErrors, meta: { totalResults: 0, sources: sourceMeta },
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // ── Compute deal scores ───────────────────────────────────────────────────
+    // ── Fetch sold comps in parallel (eBay Insights + Mercari sold) ───────────
+    const [eBaySoldRes, mercariSoldRes] = await Promise.allSettled([
+      ebayToken ? fetchEbaySoldComps(query, ebayToken) : Promise.resolve([]),
+      apifyToken ? fetchMercariSoldComps(query, apifyToken) : Promise.resolve([]),
+    ]);
+
+    const soldPrices: number[] = [
+      ...(eBaySoldRes.status === 'fulfilled' ? eBaySoldRes.value : []),
+      ...(mercariSoldRes.status === 'fulfilled' ? mercariSoldRes.value : []),
+    ];
+
+    const eBaySoldCount = eBaySoldRes.status === 'fulfilled' ? eBaySoldRes.value.length : 0;
+    const mercariSoldCount = mercariSoldRes.status === 'fulfilled' ? mercariSoldRes.value.length : 0;
+    console.log(`[Sold comps] eBay: ${eBaySoldCount} Mercari: ${mercariSoldCount} total: ${soldPrices.length}`);
+
+    // ── Compute baseline metrics ──────────────────────────────────────────────
     const allTotalPrices = filtered.map(l => l.price + l.shippingPrice);
-    const med = median(allTotalPrices);
+    const activeMed = median(allTotalPrices);
+    const soldMed = soldPrices.length >= 2 ? median(soldPrices) : null;
+    const scoreBaseline = soldMed ?? activeMed;
     const lowPrice = Math.min(...allTotalPrices);
     const highPrice = Math.max(...allTotalPrices);
     const normalizedQuery = normalizeText(query);
@@ -464,14 +506,19 @@ Deno.serve(async (req: Request) => {
       .upsert(
         {
           canonical_product_name: normalizedQuery,
-          normalized_attributes: { originalQuery: query },
-          median_price: med,
+          normalized_attributes: {
+            originalQuery: query,
+            soldMedianPrice: soldMed,
+            soldCompsCount: soldPrices.length,
+            activeCompsCount: filtered.length,
+          },
+          median_price: scoreBaseline,
           low_price: lowPrice,
           high_price: highPrice,
         },
         { onConflict: 'canonical_product_name' }
       )
-      .select('id, canonical_product_name, median_price, low_price, high_price')
+      .select('id, canonical_product_name, median_price, low_price, high_price, normalized_attributes')
       .single();
 
     const groupId: string | null = groupData?.id ?? null;
@@ -504,10 +551,10 @@ Deno.serve(async (req: Request) => {
     const insertedListings = upsertedListings ?? [];
     const listingIds = insertedListings.map((r: Record<string, unknown>) => r.id as string);
 
-    // ── Upsert deal evaluations ───────────────────────────────────────────────
+    // ── Upsert deal evaluations (with sold comps as baseline) ─────────────────
     const evalRows = insertedListings.map((row: Record<string, unknown>) => {
       const totalPrice = (parseFloat(String(row.price)) || 0) + (parseFloat(String(row.shipping_price)) || 0);
-      const scoring = computeDealScore(totalPrice, allTotalPrices, filtered.length);
+      const scoring = computeDealScore(totalPrice, allTotalPrices, soldPrices);
       return {
         listing_id: row.id as string,
         comparable_group_id: groupId,
@@ -573,11 +620,15 @@ Deno.serve(async (req: Request) => {
           medianPrice: groupData.median_price,
           lowPrice: groupData.low_price,
           highPrice: groupData.high_price,
+          soldMedianPrice: (groupData.normalized_attributes as Record<string, unknown>)?.soldMedianPrice ?? null,
+          soldCompsCount: (groupData.normalized_attributes as Record<string, unknown>)?.soldCompsCount ?? 0,
         }] : [],
         sourceErrors,
         meta: {
           totalResults: filtered.length,
           sources: sourceMeta,
+          soldComps: { eBay: eBaySoldCount, mercari: mercariSoldCount, total: soldPrices.length },
+          scoringBaseline: soldPrices.length >= 2 ? 'sold' : 'active',
         },
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
