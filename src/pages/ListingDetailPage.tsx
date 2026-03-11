@@ -200,15 +200,21 @@ export default function ListingDetailPage() {
                 </div>
               )}
 
-              <a
-                href={listing.externalUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 w-full py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-colors"
-              >
-                View Listing on {listing.source}
-                <ExternalLink className="w-4 h-4" />
-              </a>
+              {listing.externalUrl ? (
+                <a
+                  href={listing.externalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-colors"
+                >
+                  View Listing on {listing.source}
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              ) : (
+                <div className="flex items-center justify-center gap-2 w-full py-3 bg-gray-100 text-gray-400 font-semibold rounded-xl cursor-not-allowed">
+                  Listing URL unavailable
+                </div>
+              )}
             </div>
 
             {/* Comparable listings */}

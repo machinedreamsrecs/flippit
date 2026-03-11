@@ -20,7 +20,7 @@ export default function SearchPage() {
   const navigate = useNavigate();
   const query = params.get('q') ?? '';
   const { user } = useAuth();
-  const { savedSearches, canSaveMore, saveSearch, isSearchSaved } = useUser();
+  const { canSaveMore, saveSearch, isSearchSaved } = useUser();
 
   const [filters, setFilters] = useState<SearchFilters>({});
   const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
@@ -225,14 +225,6 @@ export default function SearchPage() {
                           key={l.id}
                           listing={l}
                           evaluation={getEval(l.id)}
-                          onSave={() => {
-                            if (!user) { navigate(`/login?returnTo=/search?q=${encodeURIComponent(query)}`); return; }
-                            if (isSaved) { toast('Search already saved.'); return; }
-                            if (!canSaveMore) { setShowUpgradePrompt(true); return; }
-                            saveSearch(query, filters);
-                            toast.success('Search saved to your watchlist.');
-                          }}
-                          isSaved={savedSearches.some(s => s.query === query)}
                         />
                       ))}
                     </div>

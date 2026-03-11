@@ -98,6 +98,7 @@ export default function SavedSearchCard({ savedSearch, onRemove, onToggleAlert }
                 <Link
                   key={l.id}
                   to={`/listing/${l.id}`}
+                  state={{ listing: l, evaluation: ev }}
                   className="flex items-center gap-3 hover:bg-gray-50 rounded-lg p-1.5 -mx-1.5 transition-colors"
                 >
                   <img src={l.imageUrl} alt={l.title} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
