@@ -1,98 +1,77 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import type { SavedSearch, SearchFilters } from '../data/types';
-import { normalizeQuery } from '../lib/normalize';
+import type { Listing, SavedProduct } from '../data/types';
 import { useAuth } from './AuthContext';
 import { supabase } from '../integrations/supabase/client';
 
 const MAX_SAVED_FREE = 3;
 
 interface UserContextValue {
-  savedSearches: SavedSearch[];
+  savedProducts: SavedProduct[];
   canSaveMore: boolean;
   maxSaved: number;
-  saveSearch: (query: string, filters: SearchFilters) => Promise<void>;
-  removeSearch: (id: string) => Promise<void>;
-  toggleAlert: (id: string) => Promise<void>;
-  isSearchSaved: (query: string) => boolean;
+  saveProduct: (listing: Listing) => Promise<void>;
+  removeProduct: (id: string) => Promise<void>;
+  isProductSaved: (listingId: string) => boolean;
 }
 
 const UserContext = createContext<UserContextValue | null>(null);
 
-function dbRowToSavedSearch(row: Record<string, unknown>): SavedSearch {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function dbRowToSavedProduct(row: Record<string, any>): SavedProduct {
   return {
     id: row.id as string,
     userId: row.user_id as string,
-    query: row.query as string,
-    normalizedQuery: row.normalized_query as string,
-    filters: (row.filters as SearchFilters) ?? {},
-    createdAt: row.created_at as string,
-    alertsEnabled: row.alerts_enabled as boolean,
+    listingId: row.listing_id as string,
+    listing: row.listing as Listing,
+    savedAt: row.saved_at as string,
   };
 }
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
+  const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
 
   useEffect(() => {
-    if (!user) { setSavedSearches([]); return; }
+    if (!user) { setSavedProducts([]); return; }
 
     supabase
-      .from('saved_searches')
-      .select('*')
+      .from('saved_products')
+      .select('*, listing:listings(*)')
       .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
+      .order('saved_at', { ascending: false })
       .then(({ data }) => {
-        if (data) setSavedSearches(data.map(dbRowToSavedSearch));
+        if (data) setSavedProducts(data.map(dbRowToSavedProduct));
       });
   }, [user]);
 
   const maxSaved = user?.plan === 'pro' ? Infinity : MAX_SAVED_FREE;
-  const canSaveMore = savedSearches.length < maxSaved;
+  const canSaveMore = savedProducts.length < maxSaved;
 
-  const saveSearch = useCallback(async (query: string, filters: SearchFilters) => {
+  const saveProduct = useCallback(async (listing: Listing) => {
     if (!user) return;
-    const row = {
-      user_id: user.id,
-      query,
-      normalized_query: normalizeQuery(query),
-      filters,
-      alerts_enabled: false,
-    };
+
     const { data, error } = await supabase
-      .from('saved_searches')
-      .insert(row)
-      .select()
+      .from('saved_products')
+      .insert({ user_id: user.id, listing_id: listing.id })
+      .select('*, listing:listings(*)')
       .single();
+
     if (error) throw new Error(error.message);
-    if (data) setSavedSearches(prev => [dbRowToSavedSearch(data), ...prev]);
+    if (data) setSavedProducts(prev => [dbRowToSavedProduct(data), ...prev]);
   }, [user]);
 
-  const removeSearch = useCallback(async (id: string) => {
-    const { error } = await supabase.from('saved_searches').delete().eq('id', id);
+  const removeProduct = useCallback(async (id: string) => {
+    const { error } = await supabase.from('saved_products').delete().eq('id', id);
     if (error) throw new Error(error.message);
-    setSavedSearches(prev => prev.filter(s => s.id !== id));
+    setSavedProducts(prev => prev.filter(p => p.id !== id));
   }, []);
 
-  const toggleAlert = useCallback(async (id: string) => {
-    const target = savedSearches.find(s => s.id === id);
-    if (!target) return;
-    const newVal = !target.alertsEnabled;
-    const { error } = await supabase
-      .from('saved_searches')
-      .update({ alerts_enabled: newVal })
-      .eq('id', id);
-    if (error) throw new Error(error.message);
-    setSavedSearches(prev => prev.map(s => s.id === id ? { ...s, alertsEnabled: newVal } : s));
-  }, [savedSearches]);
-
-  const isSearchSaved = useCallback((query: string) => {
-    const norm = normalizeQuery(query);
-    return savedSearches.some(s => s.normalizedQuery === norm);
-  }, [savedSearches]);
+  const isProductSaved = useCallback((listingId: string) => {
+    return savedProducts.some(p => p.listingId === listingId);
+  }, [savedProducts]);
 
   return (
-    <UserContext.Provider value={{ savedSearches, canSaveMore, maxSaved, saveSearch, removeSearch, toggleAlert, isSearchSaved }}>
+    <UserContext.Provider value={{ savedProducts, canSaveMore, maxSaved, saveProduct, removeProduct, isProductSaved }}>
       {children}
     </UserContext.Provider>
   );

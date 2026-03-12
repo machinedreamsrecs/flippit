@@ -1,24 +1,26 @@
-import { useNavigate } from 'react-router-dom';
-import { Crown, Bell, Bookmark, Zap, CheckCircle, XCircle, LogOut } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Crown, Bookmark, Zap, CheckCircle, XCircle, LogOut, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useUser } from '../contexts/UserContext';
 import { formatDate } from '../lib/utils';
 import { toast } from 'sonner';
+import { supabase } from '../integrations/supabase/client';
 
 const MAX_FREE = 3;
 
 const FREE_FEATURES = [
-  { text: '3 saved searches', included: true },
+  { text: '3 saved products', included: true },
   { text: 'Basic search results', included: true },
   { text: 'Limited flagged deals', included: true },
   { text: 'Delayed alerts', included: true },
   { text: 'Advanced filters', included: false },
   { text: 'Real-time alerts', included: false },
-  { text: 'Unlimited saved searches', included: false },
+  { text: 'Unlimited saved products', included: false },
 ];
 
 const PRO_FEATURES = [
-  { text: 'Unlimited saved searches', included: true },
+  { text: 'Unlimited saved products', included: true },
   { text: 'Full search results', included: true },
   { text: 'All flagged deals', included: true },
   { text: 'Real-time alerts', included: true },
@@ -28,15 +30,53 @@ const PRO_FEATURES = [
 ];
 
 export default function AccountPage() {
-  const { user, logout } = useAuth();
-  const { savedSearches } = useUser();
+  const { user, logout, refreshUser } = useAuth();
+  const { savedProducts } = useUser();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'annual'>('monthly');
+  const [isUpgrading, setIsUpgrading] = useState(false);
 
   if (!user) return null;
   const isPro = user.plan === 'pro';
 
-  function handleUpgrade() {
-    toast.success('Billing coming soon — this is a demo!');
+  // Detect ?upgraded=true after Stripe redirect
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    if (searchParams.get('upgraded') === 'true') {
+      refreshUser().then(() => {
+        toast.success("You're now on Pro! Welcome to Flippit Pro. 🎉");
+        setSearchParams({}, { replace: true });
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleUpgrade() {
+    if (isUpgrading) return;
+    setIsUpgrading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+        body: {
+          plan: billingPeriod,
+          returnUrl: window.location.href,
+        },
+      });
+
+      if (error || !data?.success || !data?.url) {
+        const msg = data?.error ?? error?.message ?? 'Could not start checkout';
+        toast.error(msg);
+        return;
+      }
+
+      window.location.href = data.url;
+    } catch (err) {
+      toast.error('Something went wrong. Please try again.');
+      console.error('[AccountPage] Checkout error:', err);
+    } finally {
+      setIsUpgrading(false);
+    }
   }
 
   function handleLogout() {
@@ -45,8 +85,7 @@ export default function AccountPage() {
     toast('Signed out.');
   }
 
-  const savedCount = savedSearches.length;
-  const alertsEnabled = savedSearches.filter(s => s.alertsEnabled).length;
+  const savedCount = savedProducts.length;
 
   return (
     <div className="flex-1 bg-gray-50">
@@ -79,18 +118,13 @@ export default function AccountPage() {
         </div>
 
         {/* Usage summary */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-2 gap-4 mb-6">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4 text-center">
             <Bookmark className="w-5 h-5 text-indigo-400 mx-auto mb-2" />
             <p className="text-2xl font-bold text-gray-900">
               {savedCount}{isPro ? '' : <span className="text-gray-300">/{MAX_FREE}</span>}
             </p>
-            <p className="text-xs text-gray-500 mt-0.5">Saved searches</p>
-          </div>
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4 text-center">
-            <Bell className="w-5 h-5 text-indigo-400 mx-auto mb-2" />
-            <p className="text-2xl font-bold text-gray-900">{alertsEnabled}</p>
-            <p className="text-xs text-gray-500 mt-0.5">Active alerts</p>
+            <p className="text-xs text-gray-500 mt-0.5">Saved products</p>
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4 text-center">
             <Zap className="w-5 h-5 text-indigo-400 mx-auto mb-2" />
@@ -101,6 +135,34 @@ export default function AccountPage() {
 
         {/* Plan cards */}
         <h2 className="text-base font-semibold text-gray-900 mb-4">Your Plan</h2>
+
+        {/* Billing period toggle — only show when free */}
+        {!isPro && (
+          <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 w-fit mb-4">
+            <button
+              onClick={() => setBillingPeriod('monthly')}
+              className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                billingPeriod === 'monthly'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Monthly · $12/mo
+            </button>
+            <button
+              onClick={() => setBillingPeriod('annual')}
+              className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                billingPeriod === 'annual'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Annual · $99/yr
+              <span className="ml-1.5 text-xs text-emerald-600 font-semibold">Save $45</span>
+            </button>
+          </div>
+        )}
+
         <div className="grid sm:grid-cols-2 gap-4 mb-6">
           {/* Free */}
           <div className={`relative bg-white rounded-2xl border p-5 shadow-card ${!isPro ? 'border-indigo-200 ring-2 ring-indigo-100' : 'border-gray-100'}`}>
@@ -131,7 +193,14 @@ export default function AccountPage() {
               </div>
             )}
             <h3 className="text-sm font-semibold text-indigo-200 uppercase tracking-wide mt-1">Pro</h3>
-            <p className="text-3xl font-bold mt-1 mb-1">$12<span className="text-indigo-300 text-sm font-normal">/mo</span></p>
+            {billingPeriod === 'annual' && !isPro ? (
+              <p className="text-3xl font-bold mt-1 mb-1">
+                $99<span className="text-indigo-300 text-sm font-normal">/yr</span>
+                <span className="ml-2 text-sm font-normal text-indigo-300">~$8.25/mo</span>
+              </p>
+            ) : (
+              <p className="text-3xl font-bold mt-1 mb-1">$12<span className="text-indigo-300 text-sm font-normal">/mo</span></p>
+            )}
             <ul className="space-y-2 mt-4">
               {PRO_FEATURES.map((f, i) => (
                 <li key={i} className="flex items-center gap-2">
@@ -143,9 +212,17 @@ export default function AccountPage() {
             {!isPro && (
               <button
                 onClick={handleUpgrade}
-                className="mt-5 w-full py-2.5 bg-white text-indigo-600 font-semibold rounded-xl hover:bg-indigo-50 transition-colors text-sm"
+                disabled={isUpgrading}
+                className="mt-5 w-full py-2.5 bg-white text-indigo-600 font-semibold rounded-xl hover:bg-indigo-50 transition-colors text-sm disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                Upgrade to Pro
+                {isUpgrading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Redirecting…
+                  </>
+                ) : (
+                  `Upgrade to Pro — ${billingPeriod === 'annual' ? '$99/yr' : '$12/mo'}`
+                )}
               </button>
             )}
           </div>

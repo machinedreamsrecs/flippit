@@ -1,6 +1,10 @@
 import { useNavigate, Link } from 'react-router-dom';
-import { Search, Zap, TrendingDown, Bell, ArrowRight, CheckCircle, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Search, Zap, TrendingDown, Bell, ArrowRight, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import SearchBar from '../components/ui/SearchBar';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../integrations/supabase/client';
+import { toast } from 'sonner';
 
 const EXAMPLE_QUERIES = [
   'Dyson V15 Detect', 'Herman Miller Aeron', 'PSA 10 Charizard',
@@ -26,22 +30,22 @@ const STEPS = [
     icon: Zap,
     step: '03',
     title: 'Buy when a strong deal appears',
-    description: 'Save searches and get alerted when something worth acting on surfaces.',
+    description: 'Save products and get alerted when something worth acting on surfaces.',
   },
 ];
 
 const FREE_FEATURES = [
-  { text: '3 saved searches', included: true },
+  { text: '3 saved products', included: true },
   { text: 'Basic search results', included: true },
   { text: 'Limited flagged deals per day', included: true },
   { text: 'Delayed alerts', included: true },
   { text: 'Advanced filters', included: false },
   { text: 'Real-time alerts', included: false },
-  { text: 'Unlimited saved searches', included: false },
+  { text: 'Unlimited saved products', included: false },
 ];
 
 const PRO_FEATURES = [
-  { text: 'Unlimited saved searches', included: true },
+  { text: 'Unlimited saved products', included: true },
   { text: 'Full search results', included: true },
   { text: 'All flagged deals', included: true },
   { text: 'Real-time alerts', included: true },
@@ -52,6 +56,35 @@ const PRO_FEATURES = [
 
 export default function HomePage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [isStartingCheckout, setIsStartingCheckout] = useState(false);
+
+  async function handleProCTA() {
+    if (!user) {
+      navigate('/login?returnTo=/account');
+      return;
+    }
+    if (user.plan === 'pro') {
+      navigate('/account');
+      return;
+    }
+    setIsStartingCheckout(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+        body: { plan: 'monthly', returnUrl: `${window.location.origin}/account` },
+      });
+      if (error || !data?.success || !data?.url) {
+        toast.error(data?.error ?? error?.message ?? 'Could not start checkout');
+        return;
+      }
+      window.location.href = data.url;
+    } catch (err) {
+      toast.error('Something went wrong. Please try again.');
+      console.error('[HomePage] Checkout error:', err);
+    } finally {
+      setIsStartingCheckout(false);
+    }
+  }
 
   return (
     <div className="flex-1">
@@ -176,12 +209,19 @@ export default function HomePage() {
                   </li>
                 ))}
               </ul>
-              <Link
-                to="/login"
-                className="mt-6 block w-full py-2.5 text-center rounded-xl text-sm font-semibold bg-white text-indigo-600 hover:bg-indigo-50 transition-colors"
+              <button
+                onClick={handleProCTA}
+                disabled={isStartingCheckout}
+                className="mt-6 w-full py-2.5 text-center rounded-xl text-sm font-semibold bg-white text-indigo-600 hover:bg-indigo-50 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                Start with Pro
-              </Link>
+                {isStartingCheckout ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Redirecting…</>
+                ) : user?.plan === 'pro' ? (
+                  'You\'re on Pro ✓'
+                ) : (
+                  'Start with Pro'
+                )}
+              </button>
             </div>
           </div>
         </div>

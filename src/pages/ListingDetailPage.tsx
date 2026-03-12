@@ -16,7 +16,7 @@ export default function ListingDetailPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const { canSaveMore, saveSearch, isSearchSaved } = useUser();
+  const { canSaveMore, saveProduct, isProductSaved } = useUser();
 
   const stateData = location.state as { listing?: Listing; evaluation?: DealEvaluation } | null;
   const listing: Listing | undefined = stateData?.listing ?? ALL_LISTINGS.find(l => l.id === id);
@@ -35,22 +35,24 @@ export default function ListingDetailPage() {
   const comparables = getComparableListings(listing.id);
   const group = getComparableGroup(listing.id);
 
-  // Use normalized title as the watch query
-  const watchQuery = listing.normalizedTitle.split(' ').slice(0, 4).join(' ');
-  const isSaved = isSearchSaved(watchQuery);
+  const isSaved = isProductSaved(listing.id);
 
-  function handleWatch() {
+  async function handleWatch() {
     if (!user) {
       navigate(`/login?returnTo=/listing/${listing!.id}`);
       return;
     }
-    if (isSaved) { toast('Search already saved.'); return; }
+    if (isSaved) { toast('Already saved.'); return; }
     if (!canSaveMore) {
-      toast.error("You've reached the free plan limit. Upgrade to save more searches.");
+      toast.error("You've reached the free plan limit. Upgrade to save more.");
       return;
     }
-    saveSearch(watchQuery, {});
-    toast.success('Added to your watchlist.');
+    try {
+      await saveProduct(listing!);
+      toast.success('Saved to your watchlist.');
+    } catch {
+      toast.error('Could not save this listing.');
+    }
   }
 
   return (
@@ -70,7 +72,7 @@ export default function ListingDetailPage() {
             }`}
           >
             {isSaved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
-            {isSaved ? 'Watching' : 'Watch this product'}
+            {isSaved ? 'Saved' : 'Save product'}
           </button>
         </div>
 

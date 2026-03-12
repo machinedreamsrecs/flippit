@@ -38,6 +38,14 @@ export interface SavedSearch {
   alertsEnabled: boolean;
 }
 
+export interface SavedProduct {
+  id: string;
+  userId: string;
+  listingId: string;
+  listing: Listing;
+  savedAt: string;
+}
+
 export interface Listing {
   id: string;
   source: ListingSource;
