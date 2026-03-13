@@ -70,8 +70,17 @@ export default function HomePage() {
     }
     setIsStartingCheckout(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        navigate('/login?returnTo=/account');
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: { plan: 'monthly', returnUrl: `${window.location.origin}/account` },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
       if (error || !data?.success || !data?.url) {
         toast.error(data?.error ?? error?.message ?? 'Could not start checkout');

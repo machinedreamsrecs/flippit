@@ -57,10 +57,20 @@ export default function AccountPage() {
     if (isUpgrading) return;
     setIsUpgrading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('Session expired — please sign in again.');
+        navigate('/login?returnTo=/account');
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: {
           plan: billingPeriod,
           returnUrl: window.location.href,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
         },
       });
 
