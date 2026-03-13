@@ -227,7 +227,7 @@ async function runApifyActor(
   actorId: string,
   input: Record<string, unknown>,
   token: string,
-  timeoutSecs = 12,  // reduced from 20 → faster failures, actors usually done in <8s
+  timeoutSecs = 5,  // kept low so all parallel calls finish within the 15s client timeout
 ): Promise<Record<string, unknown>[]> {
   const url = `https://api.apify.com/v2/acts/${actorId}/run-sync-get-dataset-items?token=${token}&timeout=${timeoutSecs}&memory=512`;
   const res = await fetch(url, {
