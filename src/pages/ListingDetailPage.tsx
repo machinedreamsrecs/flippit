@@ -1,6 +1,6 @@
+import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
-import { ExternalLink, ArrowLeft, MapPin, Star, Package, Info, Bookmark, BookmarkCheck } from 'lucide-react';
-import { ALL_LISTINGS, getEvaluation, getComparableListings, getComparableGroup } from '../data/mockListings';
+import { ExternalLink, ArrowLeft, MapPin, Star, Package, Info, Bookmark, BookmarkCheck, Loader2 } from 'lucide-react';
 import type { Listing, DealEvaluation } from '../data/types';
 import { formatPrice, timeAgo } from '../lib/utils';
 import DealScoreBadge from '../components/ui/DealScoreBadge';
@@ -10,6 +10,13 @@ import EmptyState from '../components/ui/EmptyState';
 import { useAuth } from '../contexts/AuthContext';
 import { useUser } from '../contexts/UserContext';
 import { toast } from 'sonner';
+import { supabase } from '../integrations/supabase/client';
+
+interface ComparableGroupInfo {
+  medianPrice: number;
+  lowPrice: number;
+  highPrice: number;
+}
 
 export default function ListingDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -19,23 +26,130 @@ export default function ListingDetailPage() {
   const { canSaveMore, saveProduct, isProductSaved } = useUser();
 
   const stateData = location.state as { listing?: Listing; evaluation?: DealEvaluation } | null;
-  const listing: Listing | undefined = stateData?.listing ?? ALL_LISTINGS.find(l => l.id === id);
 
-  if (!listing) {
-    return (
-      <div className="flex-1 bg-gray-50">
-        <div className="max-w-5xl mx-auto px-4 py-16">
-          <EmptyState icon={Package} title="Listing not found" description="This listing may have been removed or the URL is incorrect." />
-        </div>
-      </div>
-    );
-  }
+  const [listing, setListing] = useState<Listing | undefined>(stateData?.listing);
+  const [evaluation, setEvaluation] = useState<DealEvaluation | undefined>(stateData?.evaluation);
+  const [comparables, setComparables] = useState<Listing[]>([]);
+  const [group, setGroup] = useState<ComparableGroupInfo | null>(null);
+  const [loading, setLoading] = useState(!stateData?.listing);
 
-  const evaluation = stateData?.evaluation ?? getEvaluation(listing.id);
-  const comparables = getComparableListings(listing.id);
-  const group = getComparableGroup(listing.id);
+  // Load from DB when navigated directly (no router state)
+  useEffect(() => {
+    if (stateData?.listing || !id) return;
 
-  const isSaved = isProductSaved(listing.id);
+    async function loadListing() {
+      setLoading(true);
+      try {
+        // Fetch listing + evaluation together
+        const { data: evalRow, error } = await supabase
+          .from('deal_evaluations')
+          .select('*, listing:listings(id, source, external_url, title, normalized_title, image_url, price, shipping_price, currency, condition, seller_name, seller_rating, location, description, category, created_at, posted_at)')
+          .eq('listing_id', id!)
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (evalRow?.listing) {
+          const l = evalRow.listing as Record<string, unknown>;
+          const mapped: Listing = {
+            id: l.id as string,
+            source: l.source as Listing['source'],
+            externalUrl: (l.external_url ?? '') as string,
+            title: (l.title ?? '') as string,
+            normalizedTitle: (l.normalized_title ?? '') as string,
+            imageUrl: (l.image_url ?? '') as string,
+            price: parseFloat(String(l.price)) || 0,
+            shippingPrice: parseFloat(String(l.shipping_price)) || 0,
+            totalPrice: (parseFloat(String(l.price)) || 0) + (parseFloat(String(l.shipping_price)) || 0),
+            currency: 'USD',
+            condition: (l.condition ?? 'Good') as Listing['condition'],
+            sellerName: (l.seller_name ?? '') as string,
+            sellerRating: (l.seller_rating ?? null) as number | null,
+            location: (l.location ?? '') as string,
+            description: (l.description ?? '') as string,
+            createdAt: (l.created_at ?? '') as string,
+            postedAt: (l.posted_at ?? '') as string,
+            category: (l.category ?? '') as string,
+          };
+          setListing(mapped);
+
+          const eval_: DealEvaluation = {
+            id: evalRow.id as string,
+            listingId: evalRow.listing_id as string,
+            comparableGroupId: evalRow.comparable_group_id as string,
+            dealScore: evalRow.deal_score as DealEvaluation['dealScore'],
+            confidenceScore: evalRow.confidence_score as DealEvaluation['confidenceScore'],
+            estimatedSavings: parseFloat(String(evalRow.estimated_savings)) || 0,
+            flagReason: (evalRow.flag_reason ?? '') as string,
+            flagged: evalRow.flagged as boolean,
+          };
+          setEvaluation(eval_);
+
+          // Fetch comparable group info
+          if (evalRow.comparable_group_id) {
+            const { data: grp } = await supabase
+              .from('comparable_groups')
+              .select('median_price, low_price, high_price')
+              .eq('id', evalRow.comparable_group_id)
+              .maybeSingle();
+
+            if (grp) {
+              setGroup({
+                medianPrice: parseFloat(String(grp.median_price)) || 0,
+                lowPrice: parseFloat(String(grp.low_price)) || 0,
+                highPrice: parseFloat(String(grp.high_price)) || 0,
+              });
+
+              // Fetch comparable listings (same group, excluding this listing)
+              const { data: compEvals } = await supabase
+                .from('deal_evaluations')
+                .select('listing:listings(id, source, external_url, title, normalized_title, image_url, price, shipping_price, currency, condition, seller_name, seller_rating, location, description, category, created_at, posted_at)')
+                .eq('comparable_group_id', evalRow.comparable_group_id)
+                .neq('listing_id', id!)
+                .limit(6);
+
+              if (compEvals) {
+                const compListings: Listing[] = compEvals
+                  .filter(r => r.listing)
+                  .map(r => {
+                    const cl = r.listing as unknown as Record<string, unknown>;
+                    return {
+                      id: cl.id as string,
+                      source: cl.source as Listing['source'],
+                      externalUrl: (cl.external_url ?? '') as string,
+                      title: (cl.title ?? '') as string,
+                      normalizedTitle: (cl.normalized_title ?? '') as string,
+                      imageUrl: (cl.image_url ?? '') as string,
+                      price: parseFloat(String(cl.price)) || 0,
+                      shippingPrice: parseFloat(String(cl.shipping_price)) || 0,
+                      totalPrice: (parseFloat(String(cl.price)) || 0) + (parseFloat(String(cl.shipping_price)) || 0),
+                      currency: 'USD',
+                      condition: (cl.condition ?? 'Good') as Listing['condition'],
+                      sellerName: (cl.seller_name ?? '') as string,
+                      sellerRating: (cl.seller_rating ?? null) as number | null,
+                      location: (cl.location ?? '') as string,
+                      description: (cl.description ?? '') as string,
+                      createdAt: (cl.created_at ?? '') as string,
+                      postedAt: (cl.posted_at ?? '') as string,
+                      category: (cl.category ?? '') as string,
+                    };
+                  });
+                setComparables(compListings);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load listing:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadListing();
+  }, [id, stateData?.listing]);
+
+  const isSaved = isProductSaved(listing?.id ?? '');
 
   async function handleWatch() {
     if (!user) {
@@ -53,6 +167,24 @@ export default function ListingDetailPage() {
     } catch {
       toast.error('Could not save this listing.');
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex-1 bg-gray-50 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+      </div>
+    );
+  }
+
+  if (!listing) {
+    return (
+      <div className="flex-1 bg-gray-50">
+        <div className="max-w-5xl mx-auto px-4 py-16">
+          <EmptyState icon={Package} title="Listing not found" description="This listing may have been removed or the URL is incorrect." />
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -132,7 +264,9 @@ export default function ListingDetailPage() {
             <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-6">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">{listing.source}</span>
-                <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">{listing.category}</span>
+                {listing.category && (
+                  <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">{listing.category}</span>
+                )}
               </div>
 
               <h1 className="text-xl font-bold text-gray-900 leading-snug mb-4">{listing.title}</h1>

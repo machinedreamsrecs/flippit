@@ -362,7 +362,7 @@ async function fetchGoogleShopping(query: string, filters: SearchFilters, apiKey
 
   return results.slice(0, 20).map((item, idx) => ({
     source: 'Google Shopping',
-    externalUrl: (item.link ?? '') as string,
+    externalUrl: (item.link ?? item.product_link ?? '') as string,
     externalId: (item.product_id ?? String(item.position ?? idx)) as string,
     title: (item.title ?? '') as string,
     imageUrl: (item.thumbnail ?? '') as string,
