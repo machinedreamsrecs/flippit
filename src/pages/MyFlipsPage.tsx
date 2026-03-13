@@ -1,12 +1,36 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Tag, Plus, Loader2, CheckCircle, Clock, Gavel } from 'lucide-react';
+import { Tag, Plus, Loader2, CheckCircle, Clock, Gavel, ShoppingBag, Truck } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
-import type { FlippitListing } from '../data/types';
+import type { FlippitListing, Order } from '../data/types';
 import { dbRowToFlippitListing, calcSellerPayout } from '../lib/flippit-fee';
 import { formatPrice } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import EmptyState from '../components/ui/EmptyState';
+
+interface OrderRow extends Order {
+  listing: { id: string; title: string; images: string[] } | null;
+}
+
+const ORDER_STATUS_COLORS: Record<Order['status'], string> = {
+  awaiting_payment: 'bg-amber-50 text-amber-700',
+  paid: 'bg-blue-50 text-blue-700',
+  label_created: 'bg-indigo-50 text-indigo-700',
+  shipped: 'bg-purple-50 text-purple-700',
+  delivered: 'bg-teal-50 text-teal-700',
+  complete: 'bg-emerald-50 text-emerald-700',
+  cancelled: 'bg-red-50 text-red-700',
+};
+
+const ORDER_STATUS_LABELS: Record<Order['status'], string> = {
+  awaiting_payment: 'Awaiting payment',
+  paid: 'Paid — ship it!',
+  label_created: 'Label created',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  complete: 'Complete',
+  cancelled: 'Cancelled',
+};
 
 function timeUntil(isoDate: string): string {
   const ms = new Date(isoDate).getTime() - Date.now();
@@ -16,25 +40,59 @@ function timeUntil(isoDate: string): string {
   return `${Math.floor(h / 24)}d left`;
 }
 
-const TABS = ['Active', 'Sold', 'Ended'];
+const TABS = ['Active', 'Sold', 'Ended', 'Orders'];
 
 export default function MyFlipsPage() {
   const { user } = useAuth();
   const [listings, setListings] = useState<FlippitListing[]>([]);
+  const [orders, setOrders] = useState<OrderRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [tab, setTab] = useState('Active');
 
   useEffect(() => {
     if (!user) return;
-    supabase
-      .from('flippit_listings')
-      .select('*')
-      .eq('seller_id', user.id)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => {
-        setListings(data ? data.map(dbRowToFlippitListing) as FlippitListing[] : []);
-        setIsLoading(false);
-      });
+    Promise.all([
+      supabase
+        .from('flippit_listings')
+        .select('*')
+        .eq('seller_id', user.id)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('orders')
+        .select('*, listing:flippit_listings(id, title, images)')
+        .eq('seller_id', user.id)
+        .order('created_at', { ascending: false }),
+    ]).then(([{ data: listingData }, { data: orderData }]) => {
+      setListings(listingData ? listingData.map(dbRowToFlippitListing) as FlippitListing[] : []);
+      if (orderData) {
+        setOrders(orderData.map(row => ({
+          id: row.id,
+          listingId: row.listing_id,
+          buyerId: row.buyer_id,
+          sellerId: row.seller_id,
+          itemPrice: Number(row.item_price),
+          platformFee: Number(row.platform_fee),
+          salesTax: Number(row.sales_tax ?? 0),
+          buyerTotal: Number(row.buyer_total),
+          sellerPayout: row.seller_payout != null ? Number(row.seller_payout) : null,
+          buyerName: row.buyer_name,
+          buyerAddress: row.buyer_address as Order['buyerAddress'],
+          status: row.status as Order['status'],
+          stripeCheckoutSessionId: row.stripe_checkout_session_id,
+          stripePaymentIntentId: row.stripe_payment_intent_id,
+          paidAt: row.paid_at,
+          trackingNumber: row.tracking_number,
+          carrier: row.carrier,
+          shippingLabelUrl: row.shipping_label_url,
+          estimatedDelivery: row.estimated_delivery,
+          shippedAt: row.shipped_at,
+          deliveredAt: row.delivered_at,
+          createdAt: row.created_at,
+          listing: row.listing as OrderRow['listing'],
+        })));
+      }
+      setIsLoading(false);
+    });
   }, [user]);
 
   const filtered = listings.filter(l =>
@@ -89,26 +147,79 @@ export default function MyFlipsPage() {
 
         {/* Tabs */}
         <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit mb-6">
-          {TABS.map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {t} <span className="text-xs text-gray-400 ml-1">
-                {listings.filter(l =>
-                  t === 'Active' ? l.status === 'active' :
-                  t === 'Sold' ? l.status === 'sold' :
-                  l.status === 'ended',
-                ).length}
-              </span>
-            </button>
-          ))}
+          {TABS.map(t => {
+            const count = t === 'Orders' ? orders.length :
+              listings.filter(l =>
+                t === 'Active' ? l.status === 'active' :
+                t === 'Sold' ? l.status === 'sold' :
+                l.status === 'ended',
+              ).length;
+            return (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {t} <span className="text-xs text-gray-400 ml-1">{count}</span>
+              </button>
+            );
+          })}
         </div>
 
-        {isLoading ? (
+        {/* Orders tab */}
+        {tab === 'Orders' && !isLoading && (
+          orders.length === 0 ? (
+            <EmptyState icon={ShoppingBag} title="No orders yet" description="Orders appear here when buyers purchase your listings." />
+          ) : (
+            <div className="space-y-3">
+              {orders.map(order => (
+                <Link
+                  key={order.id}
+                  to={`/order/${order.id}`}
+                  className="block bg-white rounded-2xl border border-gray-100 shadow-card hover:border-indigo-100 hover:shadow-md transition-all"
+                >
+                  <div className="flex gap-4 p-4">
+                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
+                      {order.listing?.images?.[0] ? (
+                        <img src={order.listing.images[0]} alt={order.listing.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-300">
+                          <ShoppingBag className="w-5 h-5" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-gray-900 text-sm leading-snug line-clamp-1 mb-1">
+                        {order.listing?.title ?? 'Item'}
+                      </p>
+                      <p className="text-xs text-gray-400 mb-2 font-mono">{order.id.slice(0, 8).toUpperCase()}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-base font-bold text-gray-900">{formatPrice(order.itemPrice)}</p>
+                        {order.sellerPayout != null && (
+                          <p className="text-xs text-emerald-600 font-medium">→ {formatPrice(order.sellerPayout)} payout</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                      <span className={`text-xs font-semibold px-2 py-1 rounded-lg ${ORDER_STATUS_COLORS[order.status]}`}>
+                        {ORDER_STATUS_LABELS[order.status]}
+                      </span>
+                      {order.status === 'paid' && (
+                        <span className="inline-flex items-center gap-1 text-xs text-indigo-600">
+                          <Truck className="w-3 h-3" /> Ship now
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )
+        )}
+
+        {tab !== 'Orders' && (isLoading ? (
           <div className="flex justify-center py-20">
             <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
           </div>
@@ -198,7 +309,7 @@ export default function MyFlipsPage() {
               );
             })}
           </div>
-        )}
+        ))}
       </div>
     </div>
   );

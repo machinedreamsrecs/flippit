@@ -14,6 +14,7 @@ import MarketplacePage from './pages/MarketplacePage';
 import CreateListingPage from './pages/CreateListingPage';
 import FlippitListingPage from './pages/FlippitListingPage';
 import MyFlipsPage from './pages/MyFlipsPage';
+import OrderPage from './pages/OrderPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -45,6 +46,14 @@ function AppLayout() {
         <Route path="/listing/:id" element={<ListingDetailPage />} />
         <Route path="/market" element={<MarketplacePage />} />
         <Route path="/flip/:id" element={<FlippitListingPage />} />
+        <Route
+          path="/order/:id"
+          element={
+            <ProtectedRoute>
+              <OrderPage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/sell/new"
           element={

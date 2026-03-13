@@ -26,7 +26,11 @@ export default function ListingCard({ listing, evaluation: evalProp, compact = f
           : 'border-gray-100 shadow-card hover:shadow-card-hover'
       )}
     >
-      <Link to={`/listing/${listing.id}`} state={{ listing, evaluation }} className="block">
+      <Link
+        to={listing.source === 'Flippit' ? listing.externalUrl : `/listing/${listing.id}`}
+        state={{ listing, evaluation }}
+        className="block"
+      >
         {/* Image */}
         <div className={cn('relative overflow-hidden rounded-t-lg', compact ? 'h-36' : 'h-44')}>
           <img
@@ -99,15 +103,25 @@ export default function ListingCard({ listing, evaluation: evalProp, compact = f
             {isSaved ? 'Saved' : 'Save'}
           </button>
         )}
-        <a
-          href={listing.externalUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()}
-          className="ml-auto flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
-        >
-          View <ExternalLink className="w-3 h-3" />
-        </a>
+        {listing.source === 'Flippit' ? (
+          <Link
+            to={listing.externalUrl}
+            onClick={e => e.stopPropagation()}
+            className="ml-auto flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            View <ExternalLink className="w-3 h-3" />
+          </Link>
+        ) : (
+          <a
+            href={listing.externalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            className="ml-auto flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            View <ExternalLink className="w-3 h-3" />
+          </a>
+        )}
       </div>
     </div>
   );

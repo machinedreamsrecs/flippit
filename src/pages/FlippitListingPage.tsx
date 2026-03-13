@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, Tag, Gavel, User, Loader2, Package, CheckCircle, Zap } from 'lucide-react';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, MapPin, Clock, Tag, Gavel, User, Loader2, Package, CheckCircle, Zap, ShoppingCart } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../integrations/supabase/client';
 import type { FlippitListing, FlippitBid } from '../data/types';
@@ -32,6 +32,7 @@ export default function FlippitListingPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [listing, setListing] = useState<FlippitListing | null>(null);
   const [bids, setBids] = useState<FlippitBid[]>([]);
@@ -41,6 +42,8 @@ export default function FlippitListingPage() {
   const [isBuying, setIsBuying] = useState(false);
   const [isBidding, setIsBidding] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+
+  const paidOrderId = searchParams.get('paid') === 'true' ? searchParams.get('order_id') : null;
 
   useEffect(() => {
     if (!id) return;
@@ -84,39 +87,37 @@ export default function FlippitListingPage() {
   const isSold = listing.status === 'sold';
   const isBuyNow = listing.listingType === 'buy_now';
   const minNextBid = listing.currentBid ? listing.currentBid + 1 : (listing.startingBid ?? 0);
+  const auctionEnded = !isBuyNow && !!listing.endsAt && new Date(listing.endsAt) < new Date();
+  const isWinningBidder = auctionEnded && bids.length > 0 && bids[0].bidderId === user?.id && !isSold;
 
-  async function handleBuyNow() {
-    if (!user) { navigate(`/login?returnTo=/flip/${listing!.id}`); return; }
+  async function startCheckout(overrideListingId?: string) {
+    const targetId = overrideListingId ?? listing!.id;
+    if (!user) { navigate(`/login?returnTo=/flip/${targetId}`); return; }
     if (isOwner) { toast.error("You can't buy your own listing."); return; }
     setIsBuying(true);
     try {
-      const price = listing!.price!;
-      const fee = calcFee(price);
-      const payout = calcSellerPayout(price);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? '';
+      const returnUrl = `${window.location.origin}/flip/${targetId}`;
 
-      const { error } = await supabase
-        .from('flippit_listings')
-        .update({
-          status: 'sold',
-          buyer_id: user.id,
-          sale_price: price,
-          platform_fee: fee,
-          seller_payout: payout,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', listing!.id)
-        .eq('status', 'active'); // only if still active
+      const { data, error } = await supabase.functions.invoke('create-market-checkout', {
+        body: { listing_id: targetId, return_url: returnUrl },
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-      if (error) throw error;
+      if (error || !data?.success) {
+        throw new Error(data?.error ?? error?.message ?? 'Checkout failed');
+      }
 
-      setListing(prev => prev ? { ...prev, status: 'sold', buyerId: user.id, salePrice: price, platformFee: fee, sellerPayout: payout } : prev);
-      toast.success("You flipped it! 🔥 Purchase confirmed.");
-      setShowConfirm(false);
-    } catch (err) {
-      toast.error('Purchase failed. The item may have already sold.');
-    } finally {
+      window.location.href = data.url;
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Checkout failed. Please try again.');
       setIsBuying(false);
     }
+  }
+
+  async function handleBuyNow() {
+    await startCheckout();
   }
 
   async function handleBid() {
@@ -183,6 +184,25 @@ export default function FlippitListingPage() {
         >
           <ArrowLeft className="w-4 h-4" /> Flippit Market
         </Link>
+
+        {/* Payment success banner */}
+        {paidOrderId && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 mb-6 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-emerald-800">Payment confirmed! You flipped it 🔥</p>
+                <p className="text-xs text-emerald-600 mt-0.5">The seller will be notified to ship your item.</p>
+              </div>
+            </div>
+            <Link
+              to={`/order/${paidOrderId}`}
+              className="flex-shrink-0 text-xs font-semibold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              View order →
+            </Link>
+          </div>
+        )}
 
         <div className="grid lg:grid-cols-5 gap-6">
           {/* Left: Images */}
@@ -299,8 +319,29 @@ export default function FlippitListingPage() {
                 <span className="flex items-center gap-1"><User className="w-3 h-3" />{listing.sellerName}</span>
               </div>
 
+              {/* Auction winner CTA */}
+              {isWinningBidder && !isOwner && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3 mb-2">
+                  <div className="flex items-center gap-2">
+                    <Gavel className="w-4 h-4 text-amber-600" />
+                    <p className="text-sm font-bold text-amber-900">You won the auction!</p>
+                  </div>
+                  <p className="text-xs text-amber-700">
+                    Your winning bid of <strong>{formatPrice(bids[0].amount)}</strong> was accepted. Complete your purchase to secure the item.
+                  </p>
+                  <button
+                    onClick={() => startCheckout()}
+                    disabled={isBuying}
+                    className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+                  >
+                    {isBuying ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
+                    {isBuying ? 'Redirecting to checkout…' : `Pay ${formatPrice(bids[0].amount)} — Claim your win`}
+                  </button>
+                </div>
+              )}
+
               {/* Action area */}
-              {!isOwner && !isSold && (
+              {!isOwner && !isSold && !isWinningBidder && (
                 <>
                   {isBuyNow ? (
                     <>
@@ -318,7 +359,7 @@ export default function FlippitListingPage() {
                           <div className="text-sm space-y-1">
                             <div className="flex justify-between text-gray-600"><span>Item price</span><span>{formatPrice(listing.price!)}</span></div>
                           </div>
-                          <p className="text-xs text-gray-500">Payment processed separately with the seller. Flippit coordinates the sale.</p>
+                          <p className="text-xs text-gray-500">You'll be redirected to secure checkout. Sales tax calculated at checkout.</p>
                           <div className="flex gap-2">
                             <button onClick={() => setShowConfirm(false)} className="flex-1 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50">Cancel</button>
                             <button
@@ -327,7 +368,7 @@ export default function FlippitListingPage() {
                               className="flex-1 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-60 flex items-center justify-center gap-1.5"
                             >
                               {isBuying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                              {isBuying ? 'Confirming…' : 'Confirm — Flippit it!'}
+                              {isBuying ? 'Redirecting…' : 'Confirm — Flippit it!'}
                             </button>
                           </div>
                         </div>
