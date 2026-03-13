@@ -165,7 +165,7 @@ export default function SearchPage() {
             {isLiveLoading && (
               <div className="flex flex-col items-center justify-center gap-3 py-20 text-gray-400">
                 <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
-                <p className="text-sm">Searching eBay, Mercari, Facebook Marketplace, OfferUp &amp; Google Shopping…</p>
+                <p className="text-sm">Scanning every inch of the internet…</p>
               </div>
             )}
 
