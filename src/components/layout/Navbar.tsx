@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Search, Bookmark, User, LogOut, ChevronDown, Tag, Zap } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -7,9 +7,18 @@ import { cn } from '../../lib/utils';
 export default function Navbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const [searchValue, setSearchValue] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Sync navbar search input with URL query when on the search page
+  useEffect(() => {
+    if (location.pathname === '/search') {
+      setSearchValue(searchParams.get('q') ?? '');
+    }
+  }, [location.pathname, searchParams]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {

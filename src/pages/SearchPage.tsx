@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import { ALL_LISTINGS, getEvaluation } from '../data/mockListings';
 import type { Listing, DealEvaluation, SearchFilters } from '../data/types';
 import { searchListings } from '../lib/normalize';
-import SearchBar from '../components/ui/SearchBar';
 import FilterBar from '../components/ui/FilterBar';
 import ListingCard from '../components/ui/ListingCard';
 import SectionHeader from '../components/ui/SectionHeader';
@@ -16,7 +15,7 @@ import { useUser } from '../contexts/UserContext';
 import { supabase } from '../integrations/supabase/client';
 
 export default function SearchPage() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
   const query = params.get('q') ?? '';
   const { user } = useAuth();
@@ -48,9 +47,14 @@ export default function SearchPage() {
 
     (async () => {
       try {
-        const { data, error } = await supabase.functions.invoke('search-listings', {
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Search timed out')), 15_000),
+        );
+        const invokePromise = supabase.functions.invoke('search-listings', {
           body: { query, filters },
         });
+
+        const { data, error } = await Promise.race([invokePromise, timeout]) as Awaited<typeof invokePromise>;
 
         if (cancelled) return;
 
@@ -134,19 +138,16 @@ export default function SearchPage() {
     }
   }
 
-  function handleSearch(q: string) {
-    setParams({ q });
-  }
-
   return (
     <div className="flex-1 bg-gray-50">
-      {/* Search header */}
-      <div className="bg-white border-b border-gray-100 py-5">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-3">
-          <SearchBar defaultValue={query} onSearch={handleSearch} size="md" />
-          {query && <FilterBar filters={filters} onChange={setFilters} />}
+      {/* Filter bar (only when there's a query) */}
+      {query && (
+        <div className="bg-white border-b border-gray-100 py-3">
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <FilterBar filters={filters} onChange={setFilters} />
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* No query yet */}

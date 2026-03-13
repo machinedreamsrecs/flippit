@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 
@@ -19,7 +20,7 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.trim() || !password.trim()) return;
+    if (loading || !email.trim() || !password.trim()) return;
     setLoading(true);
     try {
       if (mode === 'signup') {
@@ -121,8 +122,9 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading || !email.trim() || !password.trim()}
-              className="w-full py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
             >
+              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
               {loading
                 ? (mode === 'signin' ? 'Signing in…' : 'Creating account…')
                 : (mode === 'signin' ? 'Sign in' : 'Create account')}
