@@ -10,6 +10,10 @@ import SearchPage from './pages/SearchPage';
 import ListingDetailPage from './pages/ListingDetailPage';
 import SavedSearchesPage from './pages/SavedSearchesPage';
 import AccountPage from './pages/AccountPage';
+import MarketplacePage from './pages/MarketplacePage';
+import CreateListingPage from './pages/CreateListingPage';
+import FlippitListingPage from './pages/FlippitListingPage';
+import MyFlipsPage from './pages/MyFlipsPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -39,6 +43,24 @@ function AppLayout() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/listing/:id" element={<ListingDetailPage />} />
+        <Route path="/market" element={<MarketplacePage />} />
+        <Route path="/flip/:id" element={<FlippitListingPage />} />
+        <Route
+          path="/sell/new"
+          element={
+            <ProtectedRoute>
+              <CreateListingPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/my-flips"
+          element={
+            <ProtectedRoute>
+              <MyFlipsPage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/saved"
           element={

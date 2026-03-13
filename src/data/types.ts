@@ -77,6 +77,44 @@ export interface ComparableGroup {
   highPrice: number;
 }
 
+export type FlippitListingType = 'buy_now' | 'auction';
+export type FlippitListingStatus = 'active' | 'sold' | 'ended';
+
+export interface FlippitListing {
+  id: string;
+  sellerId: string;
+  sellerName: string;
+  title: string;
+  description: string;
+  condition: Condition;
+  category: string;
+  images: string[];
+  location: string;
+  listingType: FlippitListingType;
+  price?: number;
+  startingBid?: number;
+  reservePrice?: number;
+  currentBid?: number;
+  bidCount: number;
+  endsAt?: string;
+  status: FlippitListingStatus;
+  buyerId?: string;
+  salePrice?: number;
+  platformFee?: number;
+  sellerPayout?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FlippitBid {
+  id: string;
+  listingId: string;
+  bidderId: string;
+  bidderName: string;
+  amount: number;
+  createdAt: string;
+}
+
 export interface DealEvaluation {
   id: string;
   listingId: string;

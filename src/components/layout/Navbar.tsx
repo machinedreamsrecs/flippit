@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Bookmark, User, LogOut, ChevronDown } from 'lucide-react';
+import { Search, Bookmark, User, LogOut, ChevronDown, Tag, Zap } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
@@ -38,8 +38,17 @@ export default function Navbar() {
             <span className="font-semibold text-gray-900 text-lg tracking-tight">flippit</span>
           </Link>
 
+          {/* Market link */}
+          <Link
+            to="/market"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors flex-shrink-0"
+          >
+            <Tag className="w-4 h-4" />
+            <span>Market</span>
+          </Link>
+
           {/* Center search */}
-          <form onSubmit={handleSearch} className="flex-1 max-w-xl mx-auto hidden sm:flex">
+          <form onSubmit={handleSearch} className="flex-1 max-w-md mx-auto hidden sm:flex">
             <div className="relative w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
@@ -56,6 +65,15 @@ export default function Navbar() {
           <div className="flex items-center gap-2 ml-auto">
             {user ? (
               <>
+                {/* Sell CTA */}
+                <Link
+                  to="/sell/new"
+                  className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors border border-indigo-100"
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>Sell</span>
+                </Link>
+
                 <Link
                   to="/saved"
                   className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors"
@@ -86,7 +104,15 @@ export default function Navbar() {
                   </button>
 
                   {menuOpen && (
-                    <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl border border-gray-100 shadow-lg py-1 z-50">
+                    <div className="absolute right-0 mt-1 w-52 bg-white rounded-xl border border-gray-100 shadow-lg py-1 z-50">
+                      <Link
+                        to="/my-flips"
+                        onClick={() => setMenuOpen(false)}
+                        className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <Zap className="w-4 h-4 text-indigo-400" />
+                        My Flips
+                      </Link>
                       <Link
                         to="/account"
                         onClick={() => setMenuOpen(false)}
@@ -95,6 +121,7 @@ export default function Navbar() {
                         <User className="w-4 h-4 text-gray-400" />
                         Account
                       </Link>
+                      <div className="border-t border-gray-100 my-1" />
                       <button
                         onClick={() => { logout(); setMenuOpen(false); navigate('/'); }}
                         className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
@@ -108,6 +135,12 @@ export default function Navbar() {
               </>
             ) : (
               <>
+                <Link
+                  to="/market"
+                  className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  <Tag className="w-4 h-4" /> Market
+                </Link>
                 <Link
                   to="/login"
                   className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-50 transition-colors"
